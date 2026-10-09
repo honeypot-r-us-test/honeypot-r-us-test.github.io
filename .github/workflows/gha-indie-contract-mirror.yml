@@ -1,0 +1,79 @@
+name: GHA Indie Worker contract parity on alternate test-org minutes
+on:
+  pull_request:
+    paths:
+      - ".ci-mirror/gha-indie-worker/**"
+      - ".github/workflows/gha-indie-contract-mirror.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  real-product-peer-parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: indiebuild
+            typespec: .ci-mirror/gha-indie-worker/contracts/indiebuild.tsp
+            authored: .ci-mirror/gha-indie-worker/contracts/indiebuild.schema.json
+            instances: .ci-mirror/gha-indie-worker/contracts/indiebuild-instances
+            declarations: '["GhaIndieWorker.IndieBuildRepositoryRole","GhaIndieWorker.IndieBuildTargetRole","GhaIndieWorker.IndieBuildPlatform","GhaIndieWorker.IndieBuildTarget","GhaIndieWorker.IndieBuildConfig"]'
+          - lane: build-log
+            typespec: .ci-mirror/gha-indie-worker/contracts/build-log.tsp
+            authored: .ci-mirror/gha-indie-worker/contracts/build-log.schema.json
+            instances: .ci-mirror/gha-indie-worker/contracts/instances
+            declarations: '["GhaIndieWorker.BuildLogEvent","GhaIndieWorker.BuildLogMetadata","GhaIndieWorker.BuildLogStream"]'
+    steps:
+      - name: Checkout exact test-only CI revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prove exact head and all four original peer git blob identities
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git hash-object .ci-mirror/gha-indie-worker/contracts/indiebuild.tsp)" = "12e5334c4a051ee33be2c8ba4940378ccd274b7a"
+          test "$(git hash-object .ci-mirror/gha-indie-worker/contracts/indiebuild.schema.json)" = "7b67c871e717d73c2947ab5a359cf375cac7700b"
+          test "$(git hash-object .ci-mirror/gha-indie-worker/contracts/build-log.tsp)" = "bb15b293307dca159914882e49d433b1d7825978"
+          test "$(git hash-object .ci-mirror/gha-indie-worker/contracts/build-log.schema.json)" = "b5860d59d483420e8ce544834f48ae7ad451bd13"
+      - name: Recompile independent human-authored product peers
+        uses: ORESoftware/typespec-json-schema-validator@eb669d2c2c4f0800fac54f9b5a306b550121f1ac
+        with:
+          typespec: ${{ matrix.typespec }}
+          schema: ${{ matrix.authored }}
+          instances: ${{ matrix.instances }}
+          report: .typespec-json-schema-validator/${{ matrix.lane }}/report.json
+          contract_ir: .typespec-json-schema-validator/${{ matrix.lane }}/contract-ir.json
+          output_dir: .typespec-json-schema-validator/${{ matrix.lane }}/generated
+          max_probes: "96"
+          int64_strategy: string
+          seal_object_schemas: "true"
+          polymorphic_models_strategy: oneOf
+      - name: Admit full real product IR and all canonical negative refusals
+        uses: ORESoftware/typespec-json-schema-validator/actions/test-consumer-admission@eb669d2c2c4f0800fac54f9b5a306b550121f1ac
+        with:
+          contract_ir: .typespec-json-schema-validator/${{ matrix.lane }}/contract-ir.json
+          report: .typespec-json-schema-validator/${{ matrix.lane }}/report.json
+          typespec: ${{ matrix.typespec }}
+          schema: ${{ matrix.authored }}
+          generated_schema: .typespec-json-schema-validator/${{ matrix.lane }}/generated/typespec.generated.schema.json
+          expected_declarations: ${{ matrix.declarations }}
+          verification: .typespec-json-schema-validator/${{ matrix.lane }}/verification.json
+      - name: Keep source mirror immutable
+        run: git diff --exit-code -- .ci-mirror/gha-indie-worker/
+      - name: Retain evidence, even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: gha-indie-${{ matrix.lane }}-mirror-${{ github.run_id }}
+          path: .typespec-json-schema-validator/${{ matrix.lane }}/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
