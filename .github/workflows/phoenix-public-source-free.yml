@@ -1,0 +1,26 @@
+# Public, no-source control for private-repository runner-admission diagnosis.
+# No checkout, secrets, source transfer, compilation, or production deploy.
+name: Phoenix public source-free admission 2026-10-31
+on:
+  push:
+    branches:
+      - ci/phoenix-public-source-free-20261031
+permissions: {}
+jobs:
+  source-free-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Prove first runner step
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'SOURCE_FREE_PUBLIC_FIRST_STEP=EXECUTED'
+          echo "SHA=$GITHUB_SHA"
+      - name: Prove successful completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RUNNER_OS"
+          test -n "$RUNNER_ARCH"
+          echo 'SOURCE_FREE_PUBLIC_CANARY=PASS'
